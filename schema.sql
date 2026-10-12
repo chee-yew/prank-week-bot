@@ -10,16 +10,20 @@ CREATE TABLE IF NOT EXISTS participants (
   mortal_tab_name  TEXT                       -- renamed when the pairings change
 );
 
--- angel_handle welfares mortal_handle.
+-- angel_handle welfares mortal_handle. Likes/dislikes are the mortal's, shown only to their angel.
 CREATE TABLE IF NOT EXISTS pairings (
-  angel_handle  TEXT PRIMARY KEY,
-  mortal_handle TEXT NOT NULL UNIQUE
+  angel_handle    TEXT PRIMARY KEY,
+  mortal_handle   TEXT NOT NULL UNIQUE,
+  mortal_likes    TEXT,
+  mortal_dislikes TEXT
 );
 
 -- The pairings before the last /upload, so /undoupload can restore them.
 CREATE TABLE IF NOT EXISTS pairings_backup (
-  angel_handle  TEXT PRIMARY KEY,
-  mortal_handle TEXT NOT NULL UNIQUE
+  angel_handle    TEXT PRIMARY KEY,
+  mortal_handle   TEXT NOT NULL UNIQUE,
+  mortal_likes    TEXT,
+  mortal_dislikes TEXT
 );
 
 -- Every relayed message, so a Telegram "Reply" routes back to the right person.
@@ -39,9 +43,11 @@ CREATE TABLE IF NOT EXISTS settings (
   value TEXT
 );
 
--- Pending /broadcast deliveries, drained in batches by the cron trigger.
+-- Pending /broadcast deliveries and mortal-info update notes, drained in batches by the cron trigger.
 CREATE TABLE IF NOT EXISTS broadcast_queue (
-  id      INTEGER PRIMARY KEY AUTOINCREMENT,
-  chat_id INTEGER NOT NULL,
-  text    TEXT NOT NULL
+  id        INTEGER PRIMARY KEY AUTOINCREMENT,
+  chat_id   INTEGER NOT NULL,
+  text      TEXT NOT NULL,
+  thread_id INTEGER,                          -- tab to post in; NULL = main chat
+  announce  INTEGER NOT NULL DEFAULT 1        -- 1 = prefix with the 📢 announcement header
 );

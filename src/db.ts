@@ -41,10 +41,27 @@ export interface QueuedBroadcast {
   id: number;
   chat_id: number;
   text: string;
+  /** Tab to post in; null = main chat. */
+  thread_id: number | null;
+  /** 1 = prefix with the announcement header (a /broadcast); 0 = send as is. */
+  announce: number;
 }
 
-// D1 allows at most 100 bound parameters per statement.
-const PAIRS_PER_INSERT = 50;
+export interface MortalInfo {
+  likes: string | null;
+  dislikes: string | null;
+}
+
+/** What an angel currently has: their mortal and the mortal's info, plus where to reach the angel. */
+export interface AngelSnapshot extends MortalInfo {
+  angel_handle: string;
+  mortal_handle: string;
+  chat_id: number | null;
+  mortal_thread_id: number | null;
+}
+
+// D1 allows at most 100 bound parameters per statement, and each pair binds 4.
+const PAIRS_PER_INSERT = 25;
 
 export class Db {
   constructor(private readonly d1: D1Database) {}
@@ -106,6 +123,15 @@ export class Db {
 
   // ---- reply routing ----
 
+  /** The likes/dislikes of `angelHandle`'s mortal, as given in the last upload. */
+  async mortalInfo(angelHandle: string): Promise<MortalInfo> {
+    const row = await this.d1
+      .prepare("SELECT mortal_likes AS likes, mortal_dislikes AS dislikes FROM pairings WHERE angel_handle = ?")
+      .bind(angelHandle)
+      .first<MortalInfo>();
+    return row ?? { likes: null, dislikes: null };
+  }
+
   async saveMap(recipientChatId: number, recipientMsgIds: number[], row: MsgMapRow) {
     const stmt = this.d1.prepare(
       "INSERT OR REPLACE INTO msg_map (recipient_chat_id, recipient_msg_id, sender_handle, sender_role, src_chat_id, src_msg_id) VALUES (?, ?, ?, ?, ?, ?)",
@@ -149,14 +175,19 @@ export class Db {
   async replacePairings(pairs: Pair[]) {
     const stmts: D1PreparedStatement[] = [
       this.d1.prepare("DELETE FROM pairings_backup"),
-      this.d1.prepare("INSERT INTO pairings_backup (angel_handle, mortal_handle) SELECT angel_handle, mortal_handle FROM pairings"),
+      this.d1.prepare(
+        `INSERT INTO pairings_backup (angel_handle, mortal_handle, mortal_likes, mortal_dislikes)
+         SELECT angel_handle, mortal_handle, mortal_likes, mortal_dislikes FROM pairings`,
+      ),
       this.d1.prepare("DELETE FROM pairings"),
     ];
     for (let i = 0; i < pairs.length; i += PAIRS_PER_INSERT) {
       const chunk = pairs.slice(i, i + PAIRS_PER_INSERT);
-      const placeholders = chunk.map(() => "(?, ?)").join(", ");
+      const placeholders = chunk.map(() => "(?, ?, ?, ?)").join(", ");
       stmts.push(
-        this.d1.prepare(`INSERT INTO pairings (angel_handle, mortal_handle) VALUES ${placeholders}`).bind(...chunk.flat()),
+        this.d1
+          .prepare(`INSERT INTO pairings (angel_handle, mortal_handle, mortal_likes, mortal_dislikes) VALUES ${placeholders}`)
+          .bind(...chunk.flat()),
       );
     }
     stmts.push(
@@ -173,9 +204,21 @@ export class Db {
   /** The pairings as they were before the last /upload or /undoupload. */
   async backupPairs(): Promise<Pair[]> {
     const { results } = await this.d1
-      .prepare("SELECT angel_handle, mortal_handle FROM pairings_backup ORDER BY angel_handle")
-      .all<{ angel_handle: string; mortal_handle: string }>();
-    return results.map((r) => [r.angel_handle, r.mortal_handle]);
+      .prepare("SELECT angel_handle, mortal_handle, mortal_likes, mortal_dislikes FROM pairings_backup ORDER BY angel_handle")
+      .all<{ angel_handle: string; mortal_handle: string; mortal_likes: string | null; mortal_dislikes: string | null }>();
+    return results.map((r) => [r.angel_handle, r.mortal_handle, r.mortal_likes, r.mortal_dislikes]);
+  }
+
+  /** Every angel's current mortal and mortal info, so a new upload can tell who needs an update. */
+  async angelSnapshot(): Promise<Map<string, AngelSnapshot>> {
+    const { results } = await this.d1
+      .prepare(
+        `SELECT x.angel_handle, x.mortal_handle, x.mortal_likes AS likes, x.mortal_dislikes AS dislikes,
+                a.chat_id, a.mortal_thread_id
+         FROM pairings x JOIN participants a ON a.handle = x.angel_handle`,
+      )
+      .all<AngelSnapshot>();
+    return new Map(results.map((r) => [r.angel_handle, r]));
   }
 
   async allPairs() {
@@ -252,6 +295,13 @@ export class Db {
     return res.meta.changes;
   }
 
+  /** Queues messages sent as is (no announcement header), each into its own chat and tab. */
+  async queueNotes(notes: { chat_id: number; thread_id: number | null; text: string }[]) {
+    if (notes.length === 0) return;
+    const stmt = this.d1.prepare("INSERT INTO broadcast_queue (chat_id, text, thread_id, announce) VALUES (?, ?, ?, 0)");
+    await this.d1.batch(notes.map((n) => stmt.bind(n.chat_id, n.text, n.thread_id)));
+  }
+
   /**
    * Atomically removes and returns the next `limit` queued deliveries, so the cron and an
    * in-request drain can never both send the same message.
@@ -259,7 +309,7 @@ export class Db {
   async claimBroadcasts(limit: number) {
     const { results } = await this.d1
       .prepare(
-        "DELETE FROM broadcast_queue WHERE id IN (SELECT id FROM broadcast_queue ORDER BY id LIMIT ?) RETURNING id, chat_id, text",
+        "DELETE FROM broadcast_queue WHERE id IN (SELECT id FROM broadcast_queue ORDER BY id LIMIT ?) RETURNING id, chat_id, text, thread_id, announce",
       )
       .bind(limit)
       .all<QueuedBroadcast>();
@@ -269,7 +319,7 @@ export class Db {
   /** Puts claimed-but-unsent deliveries back (e.g. after Telegram rate-limits us). */
   async requeueBroadcasts(items: QueuedBroadcast[]) {
     if (items.length === 0) return;
-    const stmt = this.d1.prepare("INSERT INTO broadcast_queue (id, chat_id, text) VALUES (?, ?, ?)");
-    await this.d1.batch(items.map((b) => stmt.bind(b.id, b.chat_id, b.text)));
+    const stmt = this.d1.prepare("INSERT INTO broadcast_queue (id, chat_id, text, thread_id, announce) VALUES (?, ?, ?, ?, ?)");
+    await this.d1.batch(items.map((b) => stmt.bind(b.id, b.chat_id, b.text, b.thread_id, b.announce)));
   }
 }

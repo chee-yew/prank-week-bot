@@ -1,4 +1,5 @@
-export type Pair = [angel: string, mortal: string];
+/** One pairing, plus what the mortal likes and dislikes (null when not given). */
+export type Pair = [angel: string, mortal: string, likes: string | null, dislikes: string | null];
 
 export interface ParseResult {
   pairs: Pair[];
@@ -8,6 +9,12 @@ export interface ParseResult {
 
 const USERNAME = /^[a-z0-9_]{4,32}$/;
 
+/** Cells that mean "nothing", so the angel doesn't see "Dislikes: nil". */
+const PLACEHOLDER = /^(nil|none|nothing|null|na|n\/a|-+|–|—)$/i;
+
+/** Long enough for a few sentences, short enough that the welcome stays under Telegram's limit. */
+export const MAX_INFO_LENGTH = 500;
+
 /** Whether an already-normalised handle could be a Telegram username. */
 export const isValidHandle = (handle: string) => USERNAME.test(handle);
 
@@ -16,7 +23,57 @@ export function normaliseHandle(raw: string): string {
 }
 
 /**
- * Parses "angel,mortal" lines (comma, tab, semicolon or space separated).
+ * Splits CSV text into rows of cells: quoted cells may hold the delimiter, line breaks and ""
+ * escapes, as Excel and Google Sheets write them.
+ */
+export function parseCsv(text: string, delimiter: string): string[][] {
+  const rows: string[][] = [];
+  let row: string[] = [];
+  let cell = "";
+  let quoted = false;
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i];
+    if (quoted) {
+      if (c !== '"') cell += c;
+      else if (text[i + 1] === '"') {
+        cell += '"';
+        i++;
+      } else quoted = false;
+    } else if (c === '"' && !cell.trim()) {
+      quoted = true;
+      cell = "";
+    } else if (c === delimiter) {
+      row.push(cell);
+      cell = "";
+    } else if (c === "\r" || c === "\n") {
+      if (c === "\r" && text[i + 1] === "\n") i++;
+      row.push(cell);
+      rows.push(row);
+      row = [];
+      cell = "";
+    } else cell += c;
+  }
+  if (cell || row.length) rows.push([...row, cell]);
+  return rows;
+}
+
+/** Tab for rows pasted from a spreadsheet, semicolon for CSVs from some Excel locales, else comma. */
+function detectDelimiter(text: string): string {
+  const first = (text.split(/\r?\n/).find((l) => l.trim()) ?? "").replace(/"[^"]*"/g, "");
+  if (first.includes("\t")) return "\t";
+  if (!first.includes(",") && first.includes(";")) return ";";
+  return ",";
+}
+
+/** A likes/dislikes cell, or null if it's empty or a placeholder like "nil". */
+function infoCell(raw: string | undefined): string | null {
+  const value = (raw ?? "").replace(/\r\n?/g, "\n").trim();
+  return value && !PLACEHOLDER.test(value) ? value : null;
+}
+
+/**
+ * Parses "angel,mortal[,likes,dislikes]" rows: a CSV file (comma or semicolon), rows pasted from a
+ * spreadsheet (tab), or the older one-pair-per-line text (comma, tab, semicolon or space).
  * Errors block the upload; warnings are reported but allowed.
  */
 export function parsePairings(text: string): ParseResult {
@@ -24,21 +81,45 @@ export function parsePairings(text: string): ParseResult {
   const errors: string[] = [];
   const warnings: string[] = [];
 
-  text.replace(/^﻿/, "").split(/\r?\n/).forEach((raw, i) => {
-    const line = raw.trim();
-    if (!line || line.startsWith("#")) return;
-    const parts = line.split(/[,\t;\s]+/).map(normaliseHandle).filter(Boolean);
-    if (/^angel/.test(parts[0] ?? "") && /^mortal/.test(parts[1] ?? "")) return; // header row
-    if (parts.length !== 2) {
-      errors.push(`Line ${i + 1}: expected "angel,mortal" but got "${line}"`);
+  text = text.replace(/^﻿/, "");
+  const rows = parseCsv(text, detectDelimiter(text));
+  let seenRow = false;
+
+  rows.forEach((cells, i) => {
+    const row = `Row ${i + 1}`;
+    while (cells.length && !cells[cells.length - 1].trim()) cells.pop();
+    if (!cells.length || cells[0].trim().startsWith("#")) return;
+
+    // A single cell is an older-style line like "alice bob" or "alice;bob".
+    if (cells.length === 1) cells = cells[0].split(/[,\t;\s]+/).filter(Boolean);
+    const [angel, mortal] = cells.slice(0, 2).map(normaliseHandle);
+
+    // Header row: the first row, if it's "angel,mortal…" or its handles aren't usernames at all.
+    const isFirst = !seenRow;
+    seenRow = true;
+    const looksLikeHeader = (/^angel/.test(angel ?? "") && /^mortal/.test(mortal ?? "")) || (!isValidHandle(angel ?? "") && !isValidHandle(mortal ?? ""));
+    if (isFirst && looksLikeHeader) return;
+
+    if (cells.length < 2) {
+      errors.push(`${row}: expected "angel,mortal" but got "${cells.join(" ")}"`);
       return;
     }
-    const [angel, mortal] = parts;
-    for (const h of [angel, mortal]) {
-      if (!isValidHandle(h)) errors.push(`Line ${i + 1}: "@${h}" is not a valid Telegram username`);
+    if (cells.length > 4) {
+      errors.push(`${row}: expected 4 columns (angel, mortal, likes, dislikes) but found ${cells.length}`);
+      return;
     }
-    if (angel === mortal) errors.push(`Line ${i + 1}: @${angel} is paired with themselves`);
-    pairs.push([angel, mortal]);
+    for (const h of [angel, mortal]) {
+      if (!isValidHandle(h)) errors.push(`${row}: "@${h}" is not a valid Telegram username`);
+    }
+    if (angel === mortal) errors.push(`${row}: @${angel} is paired with themselves`);
+    const likes = infoCell(cells[2]);
+    const dislikes = infoCell(cells[3]);
+    for (const [name, value] of [["likes", likes], ["dislikes", dislikes]] as const) {
+      if (value && value.length > MAX_INFO_LENGTH) {
+        errors.push(`${row}: @${mortal}'s ${name} are ${value.length} characters long (max ${MAX_INFO_LENGTH})`);
+      }
+    }
+    pairs.push([angel, mortal, likes, dislikes]);
   });
 
   if (pairs.length === 0 && errors.length === 0) errors.push("No pairings found.");
