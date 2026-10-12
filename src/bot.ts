@@ -2,8 +2,8 @@ import { Api, Bot, GrammyError, type Context } from "grammy";
 import type { Message, MessageEntity } from "grammy/types";
 import { parseAdminIds } from "./config";
 import { Db, type Participant, type Role } from "./db";
-import { isValidHandle, normaliseHandle, parsePairings } from "./pairings";
-import { ROLES, TAB_COLOR, TAB_LABEL, messageLabel, roleForThread, tabName, threadIdFor } from "./topics";
+import { isValidHandle, normaliseHandle, parsePairings, type Pair } from "./pairings";
+import { ROLES, TAB_COLOR, TAB_LABEL, messageLabel, mortalInfoText, roleForThread, tabName, threadIdFor } from "./topics";
 
 export interface Env {
   BOT_TOKEN: string;
@@ -34,7 +34,7 @@ Tips
 
 const ADMIN_HELP = `🛠 Admin commands
 
-/upload: replace all pairings (paste "angel,mortal" lines after the command, or send a .csv with /upload as caption)
+/upload: replace all pairings. Send a .csv with /upload as the caption, columns: angel, mortal, likes, dislikes (likes/dislikes optional; save from Excel as "CSV UTF-8"). Or paste "angel,mortal" lines after the command
 /pairs: list every pairing and who hasn't joined
 /status: join and message counts
 /missing: handles that haven't started the bot
@@ -200,11 +200,17 @@ export async function drainBroadcastQueue(api: Api, db: Db, limit: number) {
   let sent = 0;
   let failed = 0;
   for (let i = 0; i < batch.length; i++) {
-    const { chat_id, text } = batch[i];
+    const { chat_id, text, thread_id, announce } = batch[i];
     try {
-      await api.sendMessage(chat_id, `${ANNOUNCEMENT}\n\n${text}`, {
-        entities: [{ type: "bold", offset: 0, length: ANNOUNCEMENT.length }],
-      });
+      const thread = { message_thread_id: thread_id ?? undefined };
+      if (announce) {
+        await api.sendMessage(chat_id, `${ANNOUNCEMENT}\n\n${text}`, {
+          ...thread,
+          entities: [{ type: "bold", offset: 0, length: ANNOUNCEMENT.length }],
+        });
+      } else {
+        await api.sendMessage(chat_id, text, thread);
+      }
       sent++;
     } catch (err) {
       if (err instanceof GrammyError && err.error_code === 429) {
@@ -285,6 +291,8 @@ export function createBot(env: Env): Bot {
     let me = await requireParticipant(ctx);
     if (!me) return;
     const mortal = await db.partner(me.handle, "mortal");
+    const { likes, dislikes } = await db.mortalInfo(me.handle);
+    const info = mortalInfoText(likes, dislikes);
     try {
       me = await ensureTabs(ctx.api, db, me);
     } catch (err) {
@@ -299,7 +307,7 @@ export function createBot(env: Env): Bot {
     const intro: Record<Role, string> = {
       angel: "😇 Chat with your secret Angel here.",
       mortal: mortal
-        ? `🙂 Chat with your Mortal, @${mortal.handle}, here. They don't know it's you.`
+        ? `🙂 Chat with your Mortal, @${mortal.handle}, here. They don't know it's you.` + (info ? `\n\n${info}` : "")
         : "You don't have a mortal assigned yet.",
     };
     for (const role of ROLES) {
@@ -309,6 +317,7 @@ export function createBot(env: Env): Bot {
     await ctx.reply(
       `Welcome, @${me.handle}! 🎉` +
         (mortal ? ` Your Mortal is @${mortal.handle}. Take good care of them!` : "") +
+        (mortal && info ? `\n\n${info}` : "") +
         `\n\n${HELP}`,
       // Clears the old mode-switching keyboard for anyone who used an earlier version of the bot.
       { reply_markup: { remove_keyboard: true } },
@@ -322,7 +331,13 @@ export function createBot(env: Env): Bot {
     const me = await requireParticipant(ctx);
     if (!me) return;
     const mortal = await db.partner(me.handle, "mortal");
-    await ctx.reply(mortal ? `Your Mortal is @${mortal.handle} 🙂` : "You don't have a mortal assigned.");
+    if (!mortal) {
+      await ctx.reply("You don't have a mortal assigned.");
+      return;
+    }
+    const { likes, dislikes } = await db.mortalInfo(me.handle);
+    const info = mortalInfoText(likes, dislikes);
+    await ctx.reply(`Your Mortal is @${mortal.handle} 🙂` + (info ? `\n\n${info}` : ""));
   });
 
   // ---- admin commands (non-admins fall through to "Unknown command") ----
@@ -343,11 +358,38 @@ export function createBot(env: Env): Bot {
       await handleUpload(ctx, await res.text());
     });
 
+  /**
+   * Replaces the pairings, then tells every angel who has already joined if their mortal's
+   * likes/dislikes are new or changed (a new mortal counts as changed), in their Mortal tab.
+   */
+  async function savePairings(ctx: Context, pairs: Pair[]) {
+    const before = await db.angelSnapshot();
+    await db.replacePairings(pairs);
+    const after = await db.angelSnapshot();
+    const notes = [];
+    for (const now of after.values()) {
+      const info = mortalInfoText(now.likes, now.dislikes);
+      const was = before.get(now.angel_handle);
+      const changed = !was || was.mortal_handle !== now.mortal_handle || was.likes !== now.likes || was.dislikes !== now.dislikes;
+      if (info && changed && now.chat_id !== null) {
+        notes.push({
+          chat_id: now.chat_id,
+          thread_id: now.mortal_thread_id,
+          text: `📝 Updated info about your Mortal, @${now.mortal_handle}:\n\n${info}`,
+        });
+      }
+    }
+    await db.queueNotes(notes);
+    if (notes.length) await drainBroadcastQueue(ctx.api, db, BROADCAST_INLINE_BATCH);
+    return { ...(await db.stats()), notified: notes.length };
+  }
+
   async function handleUpload(ctx: Context, text: string) {
     if (!text.trim()) {
       await ctx.reply(
-        "Send /upload followed by one pairing per line:\n\n/upload\nangel_handle,mortal_handle\nangel_handle,mortal_handle\n\n" +
-          "Or send a .csv file with /upload as its caption.",
+        "Send a .csv file with /upload as its caption. Columns: angel handle, mortal handle, mortal's likes, mortal's dislikes " +
+          '(likes and dislikes are optional; "nil" or "-" counts as empty). In Excel, use File → Save As → "CSV UTF-8" so emoji survive.\n\n' +
+          "Or send /upload followed by one pairing per line:\n\n/upload\nangel_handle,mortal_handle\nangel_handle,mortal_handle",
       );
       return;
     }
@@ -357,9 +399,11 @@ export function createBot(env: Env): Bot {
       await ctx.reply(`❌ Nothing saved. Fix these and upload again:\n\n${clip(errors)}`);
       return;
     }
-    await db.replacePairings(pairs);
-    const { total, joined } = await db.stats();
+    const { total, joined, notified } = await savePairings(ctx, pairs);
+    const withInfo = pairs.filter(([, , likes, dislikes]) => likes || dislikes).length;
     let reply = `✅ Saved ${pairs.length} pairings (${total} participants, ${joined} already joined).`;
+    reply += `\n💚 ${withInfo} of ${pairs.length} mortals have likes/dislikes.`;
+    if (notified) reply += `\n📝 Telling ${notified} angels who already joined about their mortal's new info.`;
     if (warnings.length) reply += `\n\n⚠️ Warnings:\n${clip(warnings)}`;
     reply += "\n\nMistake? /undoupload restores the previous pairings.";
     await ctx.reply(reply);
@@ -474,10 +518,11 @@ export function createBot(env: Env): Bot {
       return;
     }
     // Restoring goes through replacePairings, so the current pairings become the backup: /undoupload again redoes.
-    await db.replacePairings(previous);
-    const { total, joined } = await db.stats();
+    const { total, joined, notified } = await savePairings(ctx, previous);
     await ctx.reply(
-      `↩️ Restored ${previous.length} previous pairings (${total} participants, ${joined} joined). Send /undoupload again to switch back.`,
+      `↩️ Restored ${previous.length} previous pairings (${total} participants, ${joined} joined).` +
+        (notified ? ` 📝 Telling ${notified} angels about their mortal's restored info.` : "") +
+        " Send /undoupload again to switch back.",
     );
   });
 

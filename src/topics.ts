@@ -18,6 +18,14 @@ export function messageLabel(senderRole: Role, senderHandle: string): string {
   return senderRole === "angel" ? "😇 Angel" : `🙂 Mortal (@${senderHandle})`;
 }
 
+/** The mortal's likes/dislikes as shown to their angel, one line each, or "" if neither was given. */
+export function mortalInfoText(likes: string | null, dislikes: string | null): string {
+  const lines: string[] = [];
+  if (likes) lines.push(`💚 Likes: ${likes}`);
+  if (dislikes) lines.push(`🚫 Dislikes: ${dislikes}`);
+  return lines.join("\n");
+}
+
 /** How messages refer to each tab. */
 export const TAB_LABEL: Record<Role, string> = {
   angel: "😇 Angel tab",

@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { messageLabel, roleForThread, tabName, threadIdFor } from "../src/topics.ts";
+import { messageLabel, mortalInfoText, roleForThread, tabName, threadIdFor } from "../src/topics.ts";
 
 assert.equal(messageLabel("mortal", "alice_tan"), "🙂 Mortal (@alice_tan)");
 assert.equal(messageLabel("angel", "alice_tan"), "😇 Angel");
@@ -22,5 +22,10 @@ const noTabs = { angel_thread_id: null, mortal_thread_id: null };
 assert.equal(threadIdFor(noTabs, "angel"), null);
 assert.equal(roleForThread(noTabs, undefined), null);
 assert.equal(roleForThread(noTabs, 11), null);
+
+assert.equal(mortalInfoText("cats", "durian"), "💚 Likes: cats\n🚫 Dislikes: durian");
+assert.equal(mortalInfoText("cats", null), "💚 Likes: cats");
+assert.equal(mortalInfoText(null, "durian"), "🚫 Dislikes: durian");
+assert.equal(mortalInfoText(null, null), "");
 
 console.log("topics tests passed");
