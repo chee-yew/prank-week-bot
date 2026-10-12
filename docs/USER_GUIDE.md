@@ -54,12 +54,13 @@ Inside a tab, swipe left on a message (or long-press → **Reply**) to reply to 
 - **Editing or deleting** a message after sending does **not** change what the other person already received. Think before you send!
 - As an Angel, careful: your **voice** (voice notes), your writing style and personal photos can give you away.
 - Your Mortal's name is shown to you. Your Angel's name is never shown to anyone.
+- If the organisers collected likes and dislikes, you'll see your Mortal's in your welcome message and at the top of your Mortal tab. Send `/whoismymortal` to see them again. Your Angel sees yours the same way.
 
 ### Commands
 | Command | |
 |---|---|
 | `/start` | Join, see your Mortal and get your two tabs |
-| `/whoismymortal` | Remind me who my Mortal is |
+| `/whoismymortal` | Remind me who my Mortal is, and their likes and dislikes |
 | `/help` | Show help |
 
 ---
@@ -69,30 +70,46 @@ Inside a tab, swipe left on a message (or long-press → **Reply**) to reply to 
 You become an admin when your Telegram ID is in the `ADMIN_IDS` secret. See the [Developer Guide](DEVELOPER_GUIDE.md#deployment). To find your ID, message the bot `/myid`.
 
 ### Preparing the pairing list
-Use a CSV, or plain text, with **one `angel,mortal` pair per line**, using Telegram usernames:
+Make a sheet in Excel or Google Sheets with **one pairing per row and 4 columns**:
+
+| Angel tele handle | Mortal tele handle | Likes | Dislikes |
+|---|---|---|---|
+| @alice_tan | @bob_lim | bubble tea, cats | durian |
+| @bob_lim | @charlie_ng | mala/acai/koi (pokemon packs would be amazing) | nil |
+| @charlie_ng | @alice_tan | | |
+
+- **Likes and Dislikes are the mortal's.** Only that mortal's angel sees them: in their welcome message, at the top of their Mortal tab, and with `/whoismymortal`.
+- Both columns are optional. Leave a cell empty, or write `nil`, `-`, `none` or `n/a`, and the bot simply doesn't show that line.
+- Cells can hold anything: commas, slashes, brackets, emoji, even line breaks. The limit is 500 characters per cell.
+- The header row is optional and can say anything. `@` and capital letters in handles don't matter.
+- Each person should appear **exactly once as an angel and once as a mortal**.
+- **Save it as a CSV:** in Excel, choose **File → Save As → CSV UTF-8 (Comma delimited)**; in Google Sheets, choose **File → Download → Comma-separated values**. Use **CSV UTF-8**, not plain "CSV", or emoji like 😋 get garbled.
+
+**Just the pairings, no likes or dislikes?** You can still paste plain `angel,mortal` lines straight after `/upload` instead of sending a file:
 ```
-angel,mortal
+/upload
 alice_tan,bob_lim
 bob_lim,charlie_ng
 charlie_ng,alice_tan
 ```
-- The header row is optional. `@` and capital letters don't matter.
-- Blank lines and lines starting with `#` are ignored, so you can add comments.
-- Commas, tabs, semicolons or spaces all work as separators. A sheet copied straight from Google Sheets works.
-- Each person should appear **exactly once as an angel and once as a mortal**.
+Commas, tabs, semicolons or spaces all work as separators there. Blank lines and lines starting with `#` are ignored.
 
 > 🔒 Don't put the real list in the GitHub repo, or anywhere participants can see it.
 
 ### Uploading
 Either:
-- send `/upload`, then paste the lines **in the same message**, or
-- send the `.csv` file with `/upload` as the **caption**.
+- send the `.csv` file with `/upload` as the **caption** (attach the file, then type `/upload` in the caption box), or
+- send `/upload`, then paste the lines **in the same message**.
+
+The bot's reply also says how many mortals have likes or dislikes, so you can spot missing ones.
+
+**Changing likes or dislikes later:** edit the sheet and upload it again. Every angel who has already joined and whose mortal's likes or dislikes changed gets a 📝 message in their Mortal tab with the new info. Nobody else is messaged.
 
 The bot checks the list:
 
 | Result | Meaning |
 |---|---|
-| ❌ **Errors** | **Nothing is saved.** Causes: a line without exactly two usernames, an invalid username (Telegram usernames are 4–32 letters, digits or underscores), someone paired with themselves, someone listed twice as angel or twice as mortal. Fix the list and upload again. |
+| ❌ **Errors** | **Nothing is saved.** Each error names the row number in your sheet. Causes: a row with fewer than 2 or more than 4 columns, a likes/dislikes cell over 500 characters, an invalid username (Telegram usernames are 4–32 letters, digits or underscores), someone paired with themselves, someone listed twice as angel or twice as mortal. Fix the list and upload again. |
 | ⚠️ **Warnings** | The list **is** saved, but check it. Causes: someone with no angel or no mortal, or two people who are each other's angel *and* mortal, so they can figure each other out. |
 
 Uploading again **replaces** the whole list. People who already joined stay joined, as long as they're still on the new list. Uploaded the wrong list? `/undoupload` puts the previous one back.
@@ -114,7 +131,7 @@ Uploading again **replaces** the whole list. People who already joined stay join
 
 ### Suggested launch checklist
 1. Open the `/setup` link and check it says **✅ Threaded Mode is on**. If not, turn it on in @BotFather first (see the [Developer Guide](DEVELOPER_GUIDE.md#deployment)).
-2. `/upload` the pairings and fix any errors or warnings.
+2. `/upload` the pairings CSV (with likes and dislikes, if you collected them) and fix any errors or warnings.
 3. `/pause`, so nobody chats before the event officially starts.
 4. Post **Part 1** of this guide and the bot link in the group chat, and remind everyone to **use the Telegram app on their phone, updated** first. Computer versions don't always show the tabs.
 5. Use `/missing` to chase people until everyone has joined.

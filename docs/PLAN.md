@@ -32,9 +32,11 @@ Secrets go in `wrangler secret put` and are never committed: `BOT_TOKEN` and `WE
   - **Since step 11:** `angel_thread_id INT` and `mortal_thread_id INT` (each person's two tabs) were added and `target` was dropped. See [Next event: Angel and Mortal tabs](#next-event-angel-and-mortal-tabs).
 - `pairings_backup(angel_handle TEXT PK, mortal_handle TEXT UNIQUE)`: the pairings before the last `/upload`, for `/undoupload`
 - `pairings(angel_handle TEXT PK, mortal_handle TEXT UNIQUE)`
+  - **Since step 12:** `mortal_likes TEXT` and `mortal_dislikes TEXT` (also in `pairings_backup`), from the optional 3rd and 4th upload columns. See [Mortal likes and dislikes](#mortal-likes-and-dislikes-step-12).
 - `msg_map(recipient_chat_id INT, recipient_msg_id INT, sender_handle TEXT, sender_role TEXT, src_chat_id INT, src_msg_id INT, created_at TEXT, PK(recipient_chat_id, recipient_msg_id))`: lets a recipient use Telegram's *Reply* on a relayed message, and the reply goes back to the right person, threaded under the original
 - `settings(key TEXT PK, value TEXT)`: stores the `paused` flag
 - `broadcast_queue(id INT PK AUTOINCREMENT, chat_id INT, text TEXT)`: pending `/broadcast` deliveries
+  - **Since step 12:** `thread_id INT` (tab to post in, null = main chat) and `announce INT DEFAULT 1` (0 = no 📢 header), so it also carries mortal-info update notes.
 
 ## Participant flow
 > **Replaced (step 11):** steps 2–4 and 6 below describe the original one-chat design, where you switched modes with buttons. They've been replaced by two tabs. See [Next event: Angel and Mortal tabs](#next-event-angel-and-mortal-tabs).
@@ -103,8 +105,15 @@ There is no mode to remember, so the switch buttons and the "current target" go 
 - **Old Telegram apps:** topics in private chats need a 2026 app. The User Guide asks participants to update first, and the pilot covers iOS, Android, Desktop and Web. If someone can't see tabs, the General prompt still tells them what to do, so nothing breaks.
 - **Free-plan limits:** `/start` makes about 5 Telegram calls, well under the 50 per request.
 
+## Mortal likes and dislikes (step 12)
+- **Why:** organisers collect each mortal's likes and dislikes in a sheet, and angels should get them without asking around.
+- **Upload format:** a `.csv` with `/upload` as the caption, 4 columns per row: angel handle, mortal handle, likes, dislikes. The last two are optional, so 2-column lists still work. `parseCsv()` handles Excel quoting (commas, `""` and line breaks inside quotes) and a BOM. A tab or semicolon delimiter is detected from the first row. Any header row is skipped. `nil`, `-`, `none` and `n/a` count as empty. Each cell is limited to 500 characters, and errors name the sheet row.
+- **Shown to the angel only:** in the `/start` welcome, under the Mortal tab intro, and in `/whoismymortal` (`mortalInfoText()` in `src/topics.ts`).
+- **Later changes:** `savePairings()` (used by `/upload` and `/undoupload`) compares every angel's mortal and info before and after. Each joined angel whose info changed gets a 📝 note in their Mortal tab, sent through `broadcast_queue` so the 50-request limit and 429 handling are reused.
+- **Migration:** `migrations/0004_mortal_info.sql`, run before deploying.
+
 ## Admin commands (only for user IDs listed in the `ADMIN_IDS` secret)
-- `/upload`: send a `.csv` file, or paste lines of `angel_handle,mortal_handle`. The bot validates the list:
+- `/upload`: send a `.csv` file (`angel,mortal,likes,dislikes`; the last two optional), or paste lines of `angel_handle,mortal_handle`. The bot validates the list:
   - strips `@` and lowercases handles
   - checks there are no duplicates
   - checks everyone appears exactly once as an angel and once as a mortal
@@ -171,6 +180,7 @@ There is no mode to remember, so the switch buttons and the "current target" go 
 | 11g | Labels on relayed messages (`😇 Angel` / `🙂 Mortal (@handle)`) so Telegram's "All" view is readable | ✅ done (simulated; check on a phone) |
 | 11f | After the pilot: no 👍, failure warnings quote the failed message, tab names with role and mortal handle (auto-renamed), `migrations/0003_tab_names.sql` | ✅ done (simulated; check on a phone) |
 | 11i | Shorter onboarding: the welcome, `/help` and tab intros say each thing once and lead with "chat inside the tabs"; `/angel` and `/mortal` removed | ✅ done and deployed (re-run `/setup` to refresh the command menu; check on a phone) |
+| 12 | Mortal likes/dislikes in `/upload` (4-column Excel CSV), shown to the angel, and update notes on re-upload; `migrations/0004_mortal_info.sql` | ✅ done (tested with the organiser's sample rows; check on a phone) |
 | 11e | Tabs: User Guide, Developer Guide, README; end-to-end pilot with 3 accounts on iOS, Android, Desktop and Web | 🔄 Docs done. Pilot so far: tabs show on the phone app; Telegram Desktop shows only the main chat ("Off-topic message"), and Web showed them once, then not. Participants are told to use the phone app. Still to check: a message between two accounts both ways. |
 
 ## Verification

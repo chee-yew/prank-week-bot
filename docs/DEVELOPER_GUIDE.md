@@ -84,6 +84,8 @@ Draining goes through `drainBroadcastQueue()` in `bot.ts`:
 - On **429** (rate limited), the unsent rows are put back for the next run.
 - On any other error (the person blocked the bot, or deleted their account), the row is dropped and the error logged.
 
+The same queue carries **mortal-info update notes**. `/upload` and `/undoupload` both go through `savePairings()`, which snapshots every angel's mortal and likes/dislikes (`Db.angelSnapshot()`) before and after `replacePairings()`. Each angel who has joined, whose mortal has likes or dislikes, and whose mortal or info changed gets one note queued with `Db.queueNotes()`: `announce` = 0 (no 📢 header) and `thread_id` = their Mortal tab. The queue is then drained inline, and the cron sends any rest.
+
 ## Data model
 
 Defined in [`schema.sql`](https://github.com/chee-yew/angel-mortal-bot/blob/main/schema.sql):
@@ -91,11 +93,11 @@ Defined in [`schema.sql`](https://github.com/chee-yew/angel-mortal-bot/blob/main
 | Table | Purpose |
 |---|---|
 | `participants` | `handle` (lowercase, PK), `user_id`/`chat_id` (null until /start), `joined_at`, `angel_thread_id`/`mortal_thread_id` (their two tabs, null until created), `angel_tab_name`/`mortal_tab_name` (each tab's current name) |
-| `pairings` | `angel_handle` (PK) → `mortal_handle` (unique) |
-| `pairings_backup` | The pairings as they were before the last `/upload` or `/undoupload`, so `/undoupload` can restore them |
+| `pairings` | `angel_handle` (PK) → `mortal_handle` (unique), plus `mortal_likes`/`mortal_dislikes` (the mortal's, shown only to this angel; null if not given) |
+| `pairings_backup` | The pairings, likes and dislikes as they were before the last `/upload` or `/undoupload`, so `/undoupload` can restore them |
 | `msg_map` | `(recipient_chat_id, recipient_msg_id)` → original sender, their role relative to the recipient, and the source message, for reply routing |
 | `settings` | key/value pairs, currently `paused` |
-| `broadcast_queue` | Pending `/broadcast` deliveries, one row per recipient. See [Broadcasts](#broadcasts). |
+| `broadcast_queue` | Pending deliveries, one row per recipient: `/broadcast` announcements (`announce` = 1, main chat) and mortal-info update notes (`announce` = 0, `thread_id` = the angel's Mortal tab). See [Broadcasts](#broadcasts). |
 
 `participants` is derived from `pairings` on every `/upload`:
 - new handles are inserted
@@ -119,7 +121,7 @@ Before replacing, `/upload` copies the current pairings to `pairings_backup` in 
 
 | File | What's in it |
 |---|---|
-| [`src/pairings.ts`](https://github.com/chee-yew/angel-mortal-bot/blob/main/src/pairings.ts) | `parsePairings()` turns raw text into `{pairs, errors, warnings}`. Pure, no I/O, and unit-tested. |
+| [`src/pairings.ts`](https://github.com/chee-yew/angel-mortal-bot/blob/main/src/pairings.ts) | `parsePairings()` turns an uploaded CSV or pasted text into `{pairs, errors, warnings}`, where each pair is `[angel, mortal, likes, dislikes]`. `parseCsv()` handles Excel-style quoting (commas, `""` and line breaks inside quotes). The delimiter is a tab if the first row has one, a semicolon if it has semicolons but no commas, and otherwise a comma. A row with one cell falls back to the old space/semicolon split, and `nil`/`-`/`none`/`n/a` cells become null. Pure, no I/O, and unit-tested. |
 | [`src/db.ts`](https://github.com/chee-yew/angel-mortal-bot/blob/main/src/db.ts) | `Db` class. Every SQL query lives here. |
 | [`src/bot.ts`](https://github.com/chee-yew/angel-mortal-bot/blob/main/src/bot.ts) | `createBot(env)`: participant commands, admin commands, then the relay handler, which **must stay last** because it catches every message. Also `ensureTabs()`, `deliverToTab()` and `deliver()`. |
 | [`src/topics.ts`](https://github.com/chee-yew/angel-mortal-bot/blob/main/src/topics.ts) | Tab names and colours, `roleForThread()` (which tab a message was sent in) and `threadIdFor()` (which tab to deliver to). Pure and unit-tested. |
@@ -289,7 +291,7 @@ The pairing format, commands and relay behaviour don't depend on the event, so n
 | Redeploy after code change | `npx wrangler deploy` |
 | Query the DB | `npx wrangler d1 execute angel-mortal --remote --command "SELECT * FROM participants"` |
 | Apply schema changes after pulling a new version | `npx wrangler d1 execute angel-mortal --remote --file=schema.sql`. It only creates missing tables, so it's safe to re-run and keeps your data. |
-| Upgrade a database created by an older version | Run each migration it hasn't had yet, once and in order: `npx wrangler d1 execute angel-mortal --remote --file=migrations/0002_topics.sql` (tabs), then `…--file=migrations/0003_tab_names.sql` (tab names). A database created from the current `schema.sql` needs neither. |
+| Upgrade a database created by an older version | Run each migration it hasn't had yet, once and in order: `npx wrangler d1 execute angel-mortal --remote --file=migrations/0002_topics.sql` (tabs), then `…--file=migrations/0003_tab_names.sql` (tab names), then `…--file=migrations/0004_mortal_info.sql` (likes/dislikes and tab notes). Run a migration **before** deploying the code that needs it. A database created from the current `schema.sql` needs none of them. |
 | Back up the DB | `npx wrangler d1 export angel-mortal --remote --output backup.sql` (git-ignore it, because it contains pairings) |
 
 ## Free-tier limits
@@ -318,7 +320,7 @@ The pairing format, commands and relay behaviour don't depend on the event, so n
 | `/start` says "couldn't set up your Angel and Mortal tabs" | Threaded Mode is off in BotFather (open `/setup` to check), or the participant's Telegram app is too old to support it. |
 | Participant can't see the tabs | Telegram Desktop and Web don't show bot tabs reliably yet (seen in the pilot: Web showed them, then didn't). Have them use the phone app, updated. If the tabs are missing on the phone too, send `/start` again. |
 | Can the bot open a tab for the user? | No. Bots can't open a tab, and `t.me/<bot>/<topic_id>` links don't work for bots (Telegram treats them as Mini App links: "bot application not found"). That's why there are no `/angel` or `/mortal` commands: the welcome and help text point people to the tab bar instead. |
-| "no such column: angel_thread_id" or "…angel_tab_name" in the logs | The database predates that feature. Run the missing migration (see [Operations](#operations)). |
+| "no such column: angel_thread_id", "…angel_tab_name", "…mortal_likes" or "…thread_id" in the logs | The database predates that feature. Run the missing migration (see [Operations](#operations)). |
 | The wrong person joined as someone | `/unbind @handle`, then `/swap @handle @real_username` if they still own that username. |
 | `/upload` or `/undoupload` fails with "no such table: pairings_backup" | Your database predates the backup table. Re-run `schema.sql` (see [Operations](#operations)). |
 | "isn't on the participant list" | The participant's username doesn't match the upload. Use `/swap @wrong @right`. |

@@ -13,10 +13,11 @@ The bot lets each participant chat with both through one bot. Messages are re-se
 ## Features
 - Anonymous two-way chat with your Angel and your Mortal in **two separate tabs** inside the bot chat (`😇 Angel: secret (cares for you)` and `🙂 Mortal: @their_username (you care for them)`), so you always know who you're talking to
 - All message types: text, photos, videos, GIFs, stickers, voice notes, files, locations
+- Optional **likes and dislikes** for each mortal, uploaded with the pairings, shown only to their angel
 - Telegram **Reply** works, and both sides see it threaded
 - If a message can't be delivered (for example, the other person hasn't joined yet), the bot replies to that exact message with a warning
 - Admin tools:
-  - upload and validate the pairings list
+  - upload and validate the pairings list (an Excel/Sheets CSV)
   - see who hasn't joined
   - check status
   - broadcast announcements to everyone
