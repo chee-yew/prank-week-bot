@@ -1,3 +1,4 @@
+-- Prank Week: internally "angel" means pranker and "mortal" means prankee.
 -- One row per participant. user_id/chat_id stay NULL until they /start the bot.
 CREATE TABLE IF NOT EXISTS participants (
   handle    TEXT PRIMARY KEY,                 -- lowercase Telegram username, no "@"
