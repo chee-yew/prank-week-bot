@@ -4,8 +4,8 @@ import { parseAdminIds } from "./config";
 import { Db } from "./db";
 
 const USER_COMMANDS = [
-  { command: "start", description: "Join, see your Mortal and get your two tabs" },
-  { command: "whoismymortal", description: "Remind me who my Mortal is" },
+  { command: "start", description: "Join, see your Prankee and get your two tabs" },
+  { command: "whoismyprankee", description: "Remind me who my Prankee is" },
   { command: "help", description: "How this bot works" },
 ];
 
@@ -44,8 +44,8 @@ async function setup(url: URL, env: Env): Promise<Response> {
   const me = await api.getMe();
   log.push(
     me.has_topics_enabled
-      ? "✅ Threaded Mode is on, so participants get Angel and Mortal tabs"
-      : "❌ Threaded Mode is OFF: participants can't get their Angel and Mortal tabs. Turn it on in @BotFather (Bot Settings), then open /setup again.",
+      ? "✅ Threaded Mode is on, so participants get Pranker and Prankee tabs"
+      : "❌ Threaded Mode is OFF: participants can't get their Pranker and Prankee tabs. Turn it on in @BotFather (Bot Settings), then open /setup again.",
   );
   if (me.allows_users_to_create_topics) {
     log.push("⚠️ Participants can create and delete their own topics. Turn this off in @BotFather so they only have the two tabs.");
@@ -99,7 +99,7 @@ export default {
       }
     }
 
-    return new Response("Angel & Mortal bot is running.");
+    return new Response("Prank Week bot is running.");
   },
 
   // Cron trigger (every minute, see wrangler.toml): deliver queued /broadcast messages.

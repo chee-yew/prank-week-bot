@@ -3,7 +3,7 @@ import type { Message, MessageEntity } from "grammy/types";
 import { parseAdminIds } from "./config";
 import { Db, type Participant, type Role } from "./db";
 import { isValidHandle, normaliseHandle, parsePairings, type Pair } from "./pairings";
-import { ROLES, TAB_COLOR, TAB_LABEL, messageLabel, mortalInfoText, roleForThread, tabName, threadIdFor } from "./topics";
+import { ROLES, ROLE_NAME, TAB_COLOR, TAB_LABEL, messageLabel, mortalInfoText, roleForThread, tabName, threadIdFor } from "./topics";
 
 export interface Env {
   BOT_TOKEN: string;
@@ -14,11 +14,11 @@ export interface Env {
   DB: D1Database;
 }
 
-const helpText = (eventName: string) => `👼 ${eventName} bot
+const helpText = (eventName: string) => `🃏 ${eventName} bot
 
 👆 Chat inside the tabs at the top of this chat:
-${TAB_LABEL.angel}: your secret Angel, who takes care of YOU
-${TAB_LABEL.mortal}: your Mortal, who YOU take care of
+${TAB_LABEL.angel}: your secret Pranker, who's plotting against YOU
+${TAB_LABEL.mortal}: your Prankee, who YOU get to prank
 
 Messages typed outside the tabs are NOT sent.
 
@@ -27,14 +27,15 @@ Tips
 • Use Reply on a message to answer that one.
 • No warning means it was delivered. If something fails, I'll reply to it with ⚠️.
 • Edits and deletes don't reach the other person.
-• Angels: your name is hidden, but your voice in voice notes isn't 😉
+• Prankers: your name is hidden, but your voice in voice notes isn't. Don't blow your cover 😉
+• Keep pranks within your prankee's intensity level and OUT OF BOUNDS limits 🙏
 • Can't see the tabs? Update Telegram and use the phone app.
 
-/whoismymortal · /help`;
+/whoismyprankee · /help`;
 
 const ADMIN_HELP = `🛠 Admin commands
 
-/upload: replace all pairings. Send a .csv with /upload as the caption, columns: angel, mortal, likes, dislikes (likes/dislikes optional; save from Excel as "CSV UTF-8"). Or paste "angel,mortal" lines after the command
+/upload: replace all pairings. Send a .csv with /upload as the caption, columns: pranker, prankee, prank intensity, out of bounds (the last two optional; save from Excel as "CSV UTF-8"). Or paste "pranker,prankee" lines after the command
 /pairs: list every pairing and who hasn't joined
 /status: join and message counts
 /missing: handles that haven't started the bot
@@ -47,7 +48,7 @@ const ADMIN_HELP = `🛠 Admin commands
 
 const flip = (role: Role): Role => (role === "mortal" ? "angel" : "mortal");
 
-const article = (role: Role) => (role === "angel" ? "an angel" : "a mortal");
+const article = (role: Role) => `a ${ROLE_NAME[role]}`;
 
 /** Joins up to 20 lines, noting how many were left out. */
 function clip(lines: string[], max = 20): string {
@@ -231,7 +232,7 @@ export function createBot(env: Env): Bot {
   const db = new Db(env.DB);
   const admins = new Set(parseAdminIds(env.ADMIN_IDS).ids);
   const isAdmin = (ctx: Context) => !!ctx.from && admins.has(ctx.from.id);
-  const HELP = helpText(env.EVENT_NAME?.trim() || "Angel & Mortal");
+  const HELP = helpText(env.EVENT_NAME?.trim() || "Prank Week");
 
   // Never let one bad update fail the webhook (Telegram would retry it forever),
   // but tell the user, so a lost message isn't silent.
@@ -298,17 +299,17 @@ export function createBot(env: Env): Bot {
     } catch (err) {
       console.error(`creating tabs for @${me.handle} failed:`, err);
       await ctx.reply(
-        "⚠️ I couldn't set up your Angel and Mortal tabs. Make sure your Telegram app is up to date, then send /start again. " +
+        "⚠️ I couldn't set up your Pranker and Prankee tabs. Make sure your Telegram app is up to date, then send /start again. " +
           "If it keeps happening, tell the organiser.",
       );
       return;
     }
 
     const intro: Record<Role, string> = {
-      angel: "😇 Chat with your secret Angel here.",
+      angel: "😈 Your secret Pranker can reach you here. Stay alert 👀",
       mortal: mortal
-        ? `🙂 Chat with your Mortal, @${mortal.handle}, here. They don't know it's you.` + (info ? `\n\n${info}` : "")
-        : "You don't have a mortal assigned yet.",
+        ? `🎯 Chat with your Prankee, @${mortal.handle}, here. They don't know it's you.` + (info ? `\n\n${info}` : "")
+        : "You don't have a prankee assigned yet.",
     };
     for (const role of ROLES) {
       await ctx.api.sendMessage(ctx.chat.id, intro[role], { message_thread_id: threadIdFor(me, role)! });
@@ -316,7 +317,7 @@ export function createBot(env: Env): Bot {
 
     await ctx.reply(
       `Welcome, @${me.handle}! 🎉` +
-        (mortal ? ` Your Mortal is @${mortal.handle}. Take good care of them!` : "") +
+        (mortal ? ` Your Prankee is @${mortal.handle}. Let the mischief begin! 😈` : "") +
         (mortal && info ? `\n\n${info}` : "") +
         `\n\n${HELP}`,
       // Clears the old mode-switching keyboard for anyone who used an earlier version of the bot.
@@ -327,17 +328,17 @@ export function createBot(env: Env): Bot {
   pm.command("help", (ctx) => ctx.reply(HELP));
   pm.command("myid", (ctx) => ctx.reply(`Your Telegram ID: ${ctx.from.id}`));
 
-  pm.command("whoismymortal", async (ctx) => {
+  pm.command("whoismyprankee", async (ctx) => {
     const me = await requireParticipant(ctx);
     if (!me) return;
     const mortal = await db.partner(me.handle, "mortal");
     if (!mortal) {
-      await ctx.reply("You don't have a mortal assigned.");
+      await ctx.reply("You don't have a prankee assigned.");
       return;
     }
     const { likes, dislikes } = await db.mortalInfo(me.handle);
     const info = mortalInfoText(likes, dislikes);
-    await ctx.reply(`Your Mortal is @${mortal.handle} 🙂` + (info ? `\n\n${info}` : ""));
+    await ctx.reply(`Your Prankee is @${mortal.handle} 🎯` + (info ? `\n\n${info}` : ""));
   });
 
   // ---- admin commands (non-admins fall through to "Unknown command") ----
@@ -375,7 +376,7 @@ export function createBot(env: Env): Bot {
         notes.push({
           chat_id: now.chat_id,
           thread_id: now.mortal_thread_id,
-          text: `📝 Updated info about your Mortal, @${now.mortal_handle}:\n\n${info}`,
+          text: `📝 Fresh intel on your Prankee, @${now.mortal_handle}:\n\n${info}`,
         });
       }
     }
@@ -387,9 +388,9 @@ export function createBot(env: Env): Bot {
   async function handleUpload(ctx: Context, text: string) {
     if (!text.trim()) {
       await ctx.reply(
-        "Send a .csv file with /upload as its caption. Columns: angel handle, mortal handle, mortal's likes, mortal's dislikes " +
-          '(likes and dislikes are optional; "nil" or "-" counts as empty). In Excel, use File → Save As → "CSV UTF-8" so emoji survive.\n\n' +
-          "Or send /upload followed by one pairing per line:\n\n/upload\nangel_handle,mortal_handle\nangel_handle,mortal_handle",
+        "Send a .csv file with /upload as its caption. Columns: pranker handle, prankee handle, prankee's prank intensity, prankee's OUT OF BOUNDS limits " +
+          '(the last two are optional; "nil" or "-" counts as empty). In Excel, use File → Save As → "CSV UTF-8" so emoji survive.\n\n' +
+          "Or send /upload followed by one pairing per line:\n\n/upload\npranker_handle,prankee_handle\npranker_handle,prankee_handle",
       );
       return;
     }
@@ -402,8 +403,8 @@ export function createBot(env: Env): Bot {
     const { total, joined, notified } = await savePairings(ctx, pairs);
     const withInfo = pairs.filter(([, , likes, dislikes]) => likes || dislikes).length;
     let reply = `✅ Saved ${pairs.length} pairings (${total} participants, ${joined} already joined).`;
-    reply += `\n💚 ${withInfo} of ${pairs.length} mortals have likes/dislikes.`;
-    if (notified) reply += `\n📝 Telling ${notified} angels who already joined about their mortal's new info.`;
+    reply += `\n🌶️ ${withInfo} of ${pairs.length} prankees have a prank intensity or OUT OF BOUNDS limits.`;
+    if (notified) reply += `\n📝 Telling ${notified} prankers who already joined about their prankee's new info.`;
     if (warnings.length) reply += `\n\n⚠️ Warnings:\n${clip(warnings)}`;
     reply += "\n\nMistake? /undoupload restores the previous pairings.";
     await ctx.reply(reply);
@@ -435,7 +436,7 @@ export function createBot(env: Env): Bot {
     }
     const mark = (joined: number) => (joined ? "" : " ⏳");
     const lines = rows.map((r) => `@${r.angel_handle}${mark(r.angel_joined)} → @${r.mortal_handle}${mark(r.mortal_joined)}`);
-    for (const chunk of chunkLines(["Angel → Mortal (⏳ = not joined)", "", ...lines])) await ctx.reply(chunk);
+    for (const chunk of chunkLines(["Pranker → Prankee (⏳ = not joined)", "", ...lines])) await ctx.reply(chunk);
   });
 
   admin.command("pause", async (ctx) => {
@@ -521,7 +522,7 @@ export function createBot(env: Env): Bot {
     const { total, joined, notified } = await savePairings(ctx, previous);
     await ctx.reply(
       `↩️ Restored ${previous.length} previous pairings (${total} participants, ${joined} joined).` +
-        (notified ? ` 📝 Telling ${notified} angels about their mortal's restored info.` : "") +
+        (notified ? ` 📝 Telling ${notified} prankers about their prankee's restored info.` : "") +
         " Send /undoupload again to switch back.",
     );
   });
@@ -564,7 +565,7 @@ export function createBot(env: Env): Bot {
       return;
     }
     if (dest.chat_id === null) {
-      await warn(`⚠️ Not delivered: your ${role} hasn't started the bot yet. Try again later.`);
+      await warn(`⚠️ Not delivered: your ${ROLE_NAME[role]} hasn't started the bot yet. Try again later.`);
       return;
     }
 
@@ -582,7 +583,7 @@ export function createBot(env: Env): Bot {
       sentIds = await deliverToTab(ctx.api, db, msg, dest, flip(role), messageLabel(flip(role), me.handle), replyTo);
     } catch (err) {
       if (err instanceof GrammyError && err.error_code === 403) {
-        await warn(`⚠️ Not delivered: your ${role} has blocked or stopped the bot.`);
+        await warn(`⚠️ Not delivered: your ${ROLE_NAME[role]} has blocked or stopped the bot.`);
         return;
       }
       if (err instanceof GrammyError && err.error_code === 400) {
