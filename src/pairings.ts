@@ -1,4 +1,7 @@
-/** One pairing, plus what the mortal likes and dislikes (null when not given). */
+/**
+ * One pairing, plus what the mortal likes and dislikes (null when not given). For Prank Week these
+ * hold the prankee's prank intensity and OUT OF BOUNDS limits.
+ */
 export type Pair = [angel: string, mortal: string, likes: string | null, dislikes: string | null];
 
 export interface ParseResult {
@@ -94,18 +97,19 @@ export function parsePairings(text: string): ParseResult {
     if (cells.length === 1) cells = cells[0].split(/[,\t;\s]+/).filter(Boolean);
     const [angel, mortal] = cells.slice(0, 2).map(normaliseHandle);
 
-    // Header row: the first row, if it's "angel,mortal…" or its handles aren't usernames at all.
+    // Header row: the first row, if it's "pranker,prankee…" (or the older "angel,mortal…") or its
+    // handles aren't usernames at all.
     const isFirst = !seenRow;
     seenRow = true;
-    const looksLikeHeader = (/^angel/.test(angel ?? "") && /^mortal/.test(mortal ?? "")) || (!isValidHandle(angel ?? "") && !isValidHandle(mortal ?? ""));
+    const looksLikeHeader = (/^(angel|pranker)/.test(angel ?? "") && /^(mortal|prankee)/.test(mortal ?? "")) || (!isValidHandle(angel ?? "") && !isValidHandle(mortal ?? ""));
     if (isFirst && looksLikeHeader) return;
 
     if (cells.length < 2) {
-      errors.push(`${row}: expected "angel,mortal" but got "${cells.join(" ")}"`);
+      errors.push(`${row}: expected "pranker,prankee" but got "${cells.join(" ")}"`);
       return;
     }
     if (cells.length > 4) {
-      errors.push(`${row}: expected 4 columns (angel, mortal, likes, dislikes) but found ${cells.length}`);
+      errors.push(`${row}: expected 4 columns (pranker, prankee, prank intensity, out of bounds) but found ${cells.length}`);
       return;
     }
     for (const h of [angel, mortal]) {
@@ -114,9 +118,9 @@ export function parsePairings(text: string): ParseResult {
     if (angel === mortal) errors.push(`${row}: @${angel} is paired with themselves`);
     const likes = infoCell(cells[2]);
     const dislikes = infoCell(cells[3]);
-    for (const [name, value] of [["likes", likes], ["dislikes", dislikes]] as const) {
+    for (const [name, value] of [["prank intensity", likes], ["OUT OF BOUNDS", dislikes]] as const) {
       if (value && value.length > MAX_INFO_LENGTH) {
-        errors.push(`${row}: @${mortal}'s ${name} are ${value.length} characters long (max ${MAX_INFO_LENGTH})`);
+        errors.push(`${row}: @${mortal}'s ${name} is ${value.length} characters long (max ${MAX_INFO_LENGTH})`);
       }
     }
     pairs.push([angel, mortal, likes, dislikes]);
@@ -127,19 +131,19 @@ export function parsePairings(text: string): ParseResult {
   const angels = new Set<string>();
   const mortals = new Set<string>();
   for (const [a, m] of pairs) {
-    if (angels.has(a)) errors.push(`@${a} is listed as an angel more than once`);
-    if (mortals.has(m)) errors.push(`@${m} is listed as a mortal more than once`);
+    if (angels.has(a)) errors.push(`@${a} is listed as a pranker more than once`);
+    if (mortals.has(m)) errors.push(`@${m} is listed as a prankee more than once`);
     angels.add(a);
     mortals.add(m);
   }
 
-  for (const h of angels) if (!mortals.has(h)) warnings.push(`@${h} has a mortal but no angel`);
-  for (const h of mortals) if (!angels.has(h)) warnings.push(`@${h} has an angel but no mortal`);
+  for (const h of angels) if (!mortals.has(h)) warnings.push(`@${h} has a prankee but no pranker`);
+  for (const h of mortals) if (!angels.has(h)) warnings.push(`@${h} has a pranker but no prankee`);
 
   const pairSet = new Set(pairs.map(([a, m]) => `${a}>${m}`));
   for (const [a, m] of pairs) {
     if (a < m && pairSet.has(`${m}>${a}`)) {
-      warnings.push(`@${a} and @${m} are each other's angel AND mortal, so they can work out who their angel is`);
+      warnings.push(`@${a} and @${m} are each other's pranker AND prankee, so they can work out who their pranker is`);
     }
   }
 

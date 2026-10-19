@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { parseCsv, parsePairings } from "../src/pairings.ts";
 
-// Older one-pair-per-line text: mixed separators, optional header.
+// Older one-pair-per-line text: mixed separators, optional header (the old angel,mortal wording still works).
 let r = parsePairings("angel,mortal\n@Alice_Tan, bob_lim\nbob_lim\tcharlie_ng\n\ncharlie_ng;alice_tan\n");
 assert.deepEqual(r.pairs, [
   ["alice_tan", "bob_lim", null, null],
@@ -11,6 +11,11 @@ assert.deepEqual(r.pairs, [
 assert.deepEqual(r.errors, []);
 assert.deepEqual(r.warnings, []);
 
+// "pranker" and "prankee" are valid usernames, so this header must be recognised by name.
+r = parsePairings("pranker,prankee\nalice_tan,bob_lim\nbob_lim,alice_tan");
+assert.deepEqual(r.errors, []);
+assert.equal(r.pairs.length, 2);
+
 r = parsePairings("alice_tan bob_lim\nbob_lim alice_tan");
 assert.deepEqual(r.errors, []);
 assert.equal(r.pairs.length, 2);
@@ -19,10 +24,10 @@ r = parsePairings("alice_tan,alice_tan");
 assert.ok(r.errors.some((e) => e.includes("themselves")));
 
 r = parsePairings("alice_tan,bob_lim\nalice_tan,charlie_ng");
-assert.ok(r.errors.some((e) => e.includes("angel more than once")));
+assert.ok(r.errors.some((e) => e.includes("pranker more than once")));
 
 r = parsePairings("alice_tan,bob_lim\ncharlie_ng,bob_lim");
-assert.ok(r.errors.some((e) => e.includes("mortal more than once")));
+assert.ok(r.errors.some((e) => e.includes("prankee more than once")));
 
 r = parsePairings("alice_tan,bob_lim,likes,dislikes,extra");
 assert.ok(r.errors.some((e) => e.includes("expected 4 columns")));
@@ -35,7 +40,7 @@ assert.deepEqual(r.errors, []);
 assert.ok(r.warnings.some((w) => w.includes("each other's")));
 
 r = parsePairings("alice_tan,bob_lim");
-assert.equal(r.warnings.length, 2); // open chain: alice has no angel, bob has no mortal
+assert.equal(r.warnings.length, 2); // open chain: alice has no pranker, bob has no prankee
 
 r = parsePairings("\n\n");
 assert.ok(r.errors.includes("No pairings found."));
@@ -49,7 +54,7 @@ assert.deepEqual(parseCsv('a,"b, c","say ""hi""","line1\r\nline2"\r\nd,e\r\n', "
 // Excel "CSV UTF-8" export of the organiser's sheet: BOM, any header wording, quoted commas,
 // emoji, a multi-line cell, and "nil" / "-" meaning nothing.
 const excel =
-  "﻿Angel tele handle,Mortal tele handle,Likes,Dislikes\r\n" +
+  "﻿Pranker tele handle,Prankee tele handle,Prank Intensity,OUT OF BOUNDS Limit!\r\n" +
   '@Alice_Tan,@bob_lim,mala/acai/koi (u the goat if u get pokemon packs but no pressure HAHA),a snooze mortal\r\n' +
   '@bob_lim,@charlie_ng,"chagee, protein milk (meiji choco or banana etc), acai, chobani",-\r\n' +
   '@charlie_ng,@dana_lee,"potato corner, coconut acai😋",nil\r\n' +
@@ -71,13 +76,13 @@ assert.deepEqual(r.pairs[0], ["alice_tan", "bob_lim", "coffee, tea", null]);
 assert.deepEqual(r.pairs[1], ["bob_lim", "alice_tan", null, null]);
 
 // Semicolon CSVs (Excel in some regions).
-r = parsePairings('angel;mortal;likes;dislikes\nalice_tan;bob_lim;"cats, dogs";NIL\nbob_lim;alice_tan;coffee;N/A\n');
+r = parsePairings('pranker;prankee;prank intensity;out of bounds\nalice_tan;bob_lim;"cats, dogs";NIL\nbob_lim;alice_tan;coffee;N/A\n');
 assert.deepEqual(r.errors, []);
 assert.deepEqual(r.pairs[0], ["alice_tan", "bob_lim", "cats, dogs", null]);
 assert.deepEqual(r.pairs[1], ["bob_lim", "alice_tan", "coffee", null]);
 
 // Errors point at the spreadsheet row.
-r = parsePairings(`angel,mortal,likes\nalice_tan,bob_lim,${"x".repeat(501)}`);
+r = parsePairings(`pranker,prankee,prank intensity\nalice_tan,bob_lim,${"x".repeat(501)}`);
 assert.ok(r.errors.some((e) => e.startsWith("Row 2:") && e.includes("max 500")));
 
 console.log("pairings tests passed");
