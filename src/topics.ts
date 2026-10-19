@@ -5,8 +5,8 @@ import type { Participant, Role } from "./db";
  * the header shown while chatting, so it spells out who's who; the Mortal tab names its person.
  */
 export function tabName(role: Role, mortalHandle: string | null): string {
-  if (role === "angel") return "😇 Angel: secret (cares for you)";
-  return mortalHandle ? `🙂 Mortal: @${mortalHandle} (you care for them)` : "🙂 Mortal: none assigned";
+  if (role === "angel") return "😈 Pranker: secret (pranking you)";
+  return mortalHandle ? `🎯 Prankee: @${mortalHandle} (you prank them)` : "🎯 Prankee: none assigned";
 }
 
 /**
@@ -15,21 +15,30 @@ export function tabName(role: Role, mortalHandle: string | null): string {
  * mortal is named: the recipient (their angel) already knows who they are.
  */
 export function messageLabel(senderRole: Role, senderHandle: string): string {
-  return senderRole === "angel" ? "😇 Angel" : `🙂 Mortal (@${senderHandle})`;
+  return senderRole === "angel" ? "😈 Pranker" : `🎯 Prankee (@${senderHandle})`;
 }
 
-/** The mortal's likes/dislikes as shown to their angel, one line each, or "" if neither was given. */
+/**
+ * The mortal's likes/dislikes as shown to their angel, one line each, or "" if neither was given.
+ * For Prank Week the two columns hold the prankee's prank intensity and OUT OF BOUNDS limits.
+ */
 export function mortalInfoText(likes: string | null, dislikes: string | null): string {
   const lines: string[] = [];
-  if (likes) lines.push(`💚 Likes: ${likes}`);
-  if (dislikes) lines.push(`🚫 Dislikes: ${dislikes}`);
+  if (likes) lines.push(`🌶️ Prank intensity: ${likes}`);
+  if (dislikes) lines.push(`⛔ OUT OF BOUNDS: ${dislikes}`);
   return lines.join("\n");
 }
 
 /** How messages refer to each tab. */
 export const TAB_LABEL: Record<Role, string> = {
-  angel: "😇 Angel tab",
-  mortal: "🙂 Mortal tab",
+  angel: "😈 Pranker tab",
+  mortal: "🎯 Prankee tab",
+};
+
+/** How messages name each role. */
+export const ROLE_NAME: Record<Role, string> = {
+  angel: "pranker",
+  mortal: "prankee",
 };
 
 /** Topic icon colours; Telegram only accepts a fixed set. */
